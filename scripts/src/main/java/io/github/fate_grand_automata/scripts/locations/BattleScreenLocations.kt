@@ -83,6 +83,12 @@ class BattleScreenLocations @Inject constructor(
             )
         }
 
+    /** NP percentage text below the active servant portrait. Script coordinates are 1440p. */
+    fun npValueRegion(slot: FieldSlot): Region {
+        val skill2 = locate(slot.skill2())
+        return Region(skill2.x + 160, 1240, 300, 110)
+    }
+
     val attackClick =
         (if (isWide)
             Location(-460, -230)

@@ -1,13 +1,13 @@
 package io.github.fate_grand_automata.scripts
 
 import assertk.assertThat
-import assertk.assertions.isFalse
-import assertk.assertions.isTrue
+import assertk.assertions.isInstanceOf
 import io.github.fate_grand_automata.scripts.enums.CardTypeEnum
 import io.github.fate_grand_automata.scripts.models.CommandCard
 import io.github.fate_grand_automata.scripts.models.FieldSlot
 import io.github.fate_grand_automata.scripts.models.ParsedCard
 import io.github.fate_grand_automata.scripts.models.TeamSlot
+import io.github.fate_grand_automata.scripts.modules.CardParser
 import io.github.fate_grand_automata.scripts.modules.CommandCardRecognition
 import kotlin.test.Test
 
@@ -16,33 +16,33 @@ class CommandCardRecognitionTest {
         ParsedCard(it, TeamSlot.A, FieldSlot.A, CardTypeEnum.Buster)
     }
 
-    @Test
-    fun acceptsFiveRecognizedCards() {
-        assertThat(CommandCardRecognition.isReliable(cards(), checkServant = true)).isTrue()
-    }
+    @Test fun completeCardsAreNormal() = assertThat(
+        CommandCardRecognition.classify(cards(), true)
+    ).isInstanceOf(CardParser.Result.Normal::class)
 
-    @Test
-    fun rejectsUnknownType() {
-        val cards = cards().toMutableList().also {
-            it[2] = it[2].copy(type = CardTypeEnum.Unknown)
-        }
+    @Test fun unknownServantIsDegraded() = assertThat(
+        CommandCardRecognition.classify(cards().map { it.copy(servant = TeamSlot.Unknown, fieldSlot = null) }, true)
+    ).isInstanceOf(CardParser.Result.Degraded::class)
 
-        assertThat(CommandCardRecognition.isReliable(cards, checkServant = true)).isFalse()
-    }
+    @Test fun oneUnknownTypeIsDegraded() = assertThat(
+        CommandCardRecognition.classify(cards().mapIndexed { i, card ->
+            if (i == 2) card.copy(type = CardTypeEnum.Unknown) else card
+        }, true)
+    ).isInstanceOf(CardParser.Result.Degraded::class)
 
-    @Test
-    fun allowsUnknownStunnedCard() {
-        val cards = cards().toMutableList().also {
-            it[2] = it[2].copy(type = CardTypeEnum.Unknown, servant = TeamSlot.Unknown, isStunned = true)
-        }
+    @Test fun multipleUnknownTypesNeedRecovery() = assertThat(
+        CommandCardRecognition.classify(cards().mapIndexed { i, card ->
+            if (i < 2) card.copy(type = CardTypeEnum.Unknown) else card
+        }, true)
+    ).isInstanceOf(CardParser.Result.NeedsRecovery::class)
 
-        assertThat(CommandCardRecognition.isReliable(cards, checkServant = true)).isTrue()
-    }
+    @Test fun stunnedUnknownCardIsNormal() = assertThat(
+        CommandCardRecognition.classify(cards().mapIndexed { i, card ->
+            if (i == 2) card.copy(type = CardTypeEnum.Unknown, servant = TeamSlot.Unknown, isStunned = true) else card
+        }, true)
+    ).isInstanceOf(CardParser.Result.Normal::class)
 
-    @Test
-    fun servantCheckCanBeDisabled() {
-        val cards = cards().map { it.copy(servant = TeamSlot.Unknown) }
-
-        assertThat(CommandCardRecognition.isReliable(cards, checkServant = false)).isTrue()
-    }
+    @Test fun incompleteSlotsAreUnsafe() = assertThat(
+        CommandCardRecognition.classify(cards().dropLast(1), true)
+    ).isInstanceOf(CardParser.Result.Unsafe::class)
 }

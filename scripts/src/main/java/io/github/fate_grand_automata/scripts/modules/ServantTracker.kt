@@ -1,8 +1,10 @@
 package io.github.fate_grand_automata.scripts.modules
 
+import io.github.fate_grand_automata.SupportImageKind
 import io.github.fate_grand_automata.scripts.IFgoAutomataApi
 import io.github.fate_grand_automata.scripts.Images
 import io.github.fate_grand_automata.scripts.ScriptLog
+import io.github.fate_grand_automata.scripts.entrypoints.AutoBattle
 import io.github.fate_grand_automata.scripts.models.CommandCard
 import io.github.fate_grand_automata.scripts.models.FieldSlot
 import io.github.fate_grand_automata.scripts.models.OrderChangeMember
@@ -16,7 +18,8 @@ import kotlin.time.Duration.Companion.seconds
 
 @ScriptScope
 class ServantTracker @Inject constructor(
-    api: IFgoAutomataApi
+    api: IFgoAutomataApi,
+    private val recovery: RecoveryWatchdog
 ) : IFgoAutomataApi by api, AutoCloseable {
 
     private val servantQueue = mutableListOf<TeamSlot>()
@@ -57,6 +60,7 @@ class ServantTracker @Inject constructor(
     private var supportSlot: TeamSlot? = null
 
     private val faceCardImages = mutableMapOf<TeamSlot, MutableList<Pattern>>()
+    private val uOlgaSlots = mutableSetOf<TeamSlot>()
 
     override fun close() {
         checkImages.values.forEach { it.close() }
@@ -112,6 +116,13 @@ class ServantTracker @Inject constructor(
                 DETAILS_TIMEOUT
             )
             messages.log(ScriptLog.Recovery("servant-details-open", attempt, success))
+            if (!success) {
+                val decision = recovery.request(
+                    "servant-details-open",
+                    RecoveryWatchdog.Context(-1, -1, "details:$slot")
+                )
+                if (decision.level == RecoveryWatchdog.Level.Stop) return@any false
+            }
             success
         }
         if (!opened) return
@@ -121,6 +132,9 @@ class ServantTracker @Inject constructor(
         250.milliseconds.wait()
 
         val image = locations.battle.servantDetailsFaceCardRegion.getPattern("Face $teamSlot")
+        val isUOlga = images.loadSupportPattern(SupportImageKind.Servant, U_OLGA_NAME)
+            .any { portrait -> portrait.findMatches(image, prefs.platformPrefs.minSimilarity).any() }
+        if (isUOlga) uOlgaSlots += teamSlot else uOlgaSlots -= teamSlot
 
         // Closing can occasionally be swallowed while the details animation is running. Confirm
         // that battle controls return and retry a bounded number of times.
@@ -131,6 +145,13 @@ class ServantTracker @Inject constructor(
                 DETAILS_TIMEOUT
             )
             messages.log(ScriptLog.Recovery("servant-details-close", attempt, success))
+            if (!success) {
+                val decision = recovery.request(
+                    "servant-details-close",
+                    RecoveryWatchdog.Context(-1, -1, "details:$slot")
+                )
+                if (decision.level == RecoveryWatchdog.Level.Stop) return@any false
+            }
             success
         }
         if (!closed) {
@@ -139,7 +160,11 @@ class ServantTracker @Inject constructor(
             locations.battle.extraInfoWindowCloseClick.click()
             if (!locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], DETAILS_TIMEOUT)) {
                 image.close()
-                throw IllegalStateException("Unable to close servant details after $DETAILS_MAX_ATTEMPTS attempts")
+                throw AutoBattle.BattleExitException(
+                    AutoBattle.ExitReason.RecoveryExhausted(
+                        "Unable to close servant details after $DETAILS_MAX_ATTEMPTS attempts"
+                    )
+                )
             }
         }
 
@@ -200,6 +225,8 @@ class ServantTracker @Inject constructor(
         FieldSlot.list.forEach {
             check(it)
         }
+
+    fun isUOlga(slot: FieldSlot) = deployed[slot] in uOlgaSlots
 
     fun orderChanged(starting: OrderChangeMember.Starting, sub: OrderChangeMember.Sub) {
         val startingSlot = when (starting) {
@@ -297,5 +324,6 @@ class ServantTracker @Inject constructor(
     private companion object {
         const val DETAILS_MAX_ATTEMPTS = 3
         val DETAILS_TIMEOUT = 2.seconds
+        const val U_OLGA_NAME = "U-Olga Marie"
     }
 }

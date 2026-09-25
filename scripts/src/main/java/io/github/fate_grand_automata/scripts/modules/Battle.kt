@@ -24,7 +24,8 @@ class Battle @Inject constructor(
     private val skillSpam: SkillSpam,
     private val shuffleChecker: ShuffleChecker,
     private val stageTracker: StageTracker,
-    private val autoChooseTarget: AutoChooseTarget
+    private val autoChooseTarget: AutoChooseTarget,
+    private val recovery: RecoveryWatchdog
 ) : IFgoAutomataApi by api {
     init {
         prefs.stopAfterThisRun = false
@@ -56,7 +57,7 @@ class Battle @Inject constructor(
 
     fun isIdle() = images[Images.BattleScreen] in locations.battle.screenCheckRegion
 
-    fun clickAttack(): List<ParsedCard> {
+    fun clickAttack(): CardParser.Result {
         locations.battle.attackClick.click()
 
         // Wait for Attack button to disappear
@@ -90,15 +91,31 @@ class Battle @Inject constructor(
         0.5.seconds.wait()
     }
 
-    private fun readCardsWithRecovery(): List<ParsedCard> = try {
-        clickAttack()
-    } catch (_: CardParser.RecognitionException) {
-        // Leave the card screen and reopen it to force FGO to redraw all five cards before the
-        // final bounded set of recognition attempts.
+    private fun readCardsWithRecovery(): List<ParsedCard> {
+        val first = clickAttack()
+        if (first is CardParser.Result.Normal || first is CardParser.Result.Degraded) return first.cards
+
+        // Leave the card screen only when recognition cannot be safely degraded. The shared
+        // watchdog budget was already charged by the reads and is not reset by this transition.
         locations.attack.backClick.click()
-        locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], 2.seconds)
-        clickAttack()
+        if (!locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], 2.seconds)) {
+            recoveryStop("card-recovery-battle-page")
+        }
+        val decision = recovery.request(
+            "reenter-attack",
+            RecoveryWatchdog.Context(state.stage, state.turn, "read-cards")
+        )
+        if (decision.level == RecoveryWatchdog.Level.Stop) recoveryStop("card-recovery-budget")
+        return when (val recovered = clickAttack()) {
+            is CardParser.Result.Normal, is CardParser.Result.Degraded -> recovered.cards
+            is CardParser.Result.NeedsRecovery, is CardParser.Result.Unsafe ->
+                recoveryStop("command-cards-unsafe")
+        }
     }
+
+    private fun recoveryStop(reason: String): Nothing = throw AutoBattle.BattleExitException(
+        AutoBattle.ExitReason.RecoveryExhausted(reason)
+    )
 
     private fun shouldShuffle(cards: List<ParsedCard>, npUsage: NPUsage): Boolean {
         // Not this wave
@@ -124,7 +141,11 @@ class Battle @Inject constructor(
         caster.castMasterSkill(Skill.Master.C)
         state.shuffled = true
 
-        return clickAttack()
+        return when (val result = clickAttack()) {
+            is CardParser.Result.Normal, is CardParser.Result.Degraded -> result.cards
+            is CardParser.Result.NeedsRecovery, is CardParser.Result.Unsafe ->
+                recoveryStop("shuffle-command-cards-unsafe")
+        }
     }
 
     private fun onTurnStarted() = useSameSnapIn {

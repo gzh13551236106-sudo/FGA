@@ -43,7 +43,14 @@ sealed class ScriptLog {
     ) : ScriptLog()
 
     class SkillRestricted(val skill: Skill.Servant) : ScriptLog()
-    class Recovery(val area: String, val attempt: Int, val succeeded: Boolean) : ScriptLog()
+    class SkillPrecondition(val skill: Skill.Servant, val reason: String) : ScriptLog()
+    class Recovery(
+        val area: String,
+        val attempt: Int,
+        val succeeded: Boolean,
+        val level: String? = null,
+        val remainingBudget: Int? = null
+    ) : ScriptLog()
 }
 
 interface IScriptMessages {

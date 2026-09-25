@@ -17,9 +17,15 @@ class CardParser @Inject constructor(
     private val servantTracker: ServantTracker
 ) : IFgoAutomataApi by api {
 
-    class RecognitionException(val cards: List<ParsedCard>) : IllegalStateException(
-        "Unable to recognize all command cards after bounded retries"
-    )
+    sealed class Result {
+        abstract val cards: List<ParsedCard>
+        data class Normal(override val cards: List<ParsedCard>) : Result()
+        data class Degraded(override val cards: List<ParsedCard>, val reasons: Set<Reason>) : Result()
+        data class NeedsRecovery(override val cards: List<ParsedCard>, val reasons: Set<Reason>) : Result()
+        data class Unsafe(override val cards: List<ParsedCard>, val reason: Reason) : Result()
+    }
+
+    enum class Reason { IncompleteSlots, UnknownServant, UnknownCardType }
 
     private fun CommandCard.Face.affinity(): CardAffinityEnum {
         val region = locations.attack.affinityRegion(this)
@@ -133,18 +139,27 @@ class CardParser @Inject constructor(
         return cards
     }
 
-    fun isReliable(cards: List<ParsedCard>) = CommandCardRecognition.isReliable(
+    fun classify(cards: List<ParsedCard>) = CommandCardRecognition.classify(
         cards = cards,
         checkServant = !prefs.skipServantFaceCardCheck
     )
 }
 
 internal object CommandCardRecognition {
-    fun isReliable(cards: List<ParsedCard>, checkServant: Boolean) =
-        cards.size == CommandCard.Face.list.size && cards.all {
-            it.isStunned || (
-                it.type != CardTypeEnum.Unknown &&
-                    (!checkServant || it.servant !is TeamSlot.Unknown)
-                )
+    fun classify(cards: List<ParsedCard>, checkServant: Boolean): CardParser.Result {
+        if (cards.map { it.card }.toSet() != CommandCard.Face.list.toSet()) {
+            return CardParser.Result.Unsafe(cards, CardParser.Reason.IncompleteSlots)
         }
+        val unknownTypes = cards.count { !it.isStunned && it.type == CardTypeEnum.Unknown }
+        val unknownServants = checkServant && cards.any { !it.isStunned && it.servant is TeamSlot.Unknown }
+        val reasons = buildSet {
+            if (unknownTypes > 0) add(CardParser.Reason.UnknownCardType)
+            if (unknownServants) add(CardParser.Reason.UnknownServant)
+        }
+        return when {
+            unknownTypes > 1 -> CardParser.Result.NeedsRecovery(cards, reasons)
+            reasons.isNotEmpty() -> CardParser.Result.Degraded(cards, reasons)
+            else -> CardParser.Result.Normal(cards)
+        }
+    }
 }

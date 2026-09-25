@@ -22,7 +22,8 @@ class Caster @Inject constructor(
     api: IFgoAutomataApi,
     private val state: BattleState,
     private val servantTracker: ServantTracker,
-    private val skillRestrictionGuard: SkillRestrictionGuard
+    private val skillRestrictionGuard: SkillRestrictionGuard,
+    private val recovery: RecoveryWatchdog
 ) : IFgoAutomataApi by api {
     private var skillConfirmation: Boolean? = null
 
@@ -61,11 +62,20 @@ class Caster @Inject constructor(
         castSkill(skill, listOfNotNull(target))
 
     private fun castSkill(skill: Skill, targets: List<ServantTarget>): Boolean {
+        if (skill is Skill.Servant &&
+            skillRestrictionGuard.checkBeforeClick(skill) != SkillRestrictionGuard.Precondition.Allowed
+        ) return false
+
+        val context = RecoveryWatchdog.Context(state.stage, state.turn, "skill:$skill")
+        val actionId = "skill:$skill:${targets.joinToString()}"
+        if (!recovery.canSend(context, actionId)) return false
+
         when (skill) {
             is Skill.Master -> locations.battle.master.locate(skill)
             is Skill.Servant -> locations.battle.locate(skill)
             is Skill.CommandSpell -> locations.battle.master.locate(skill)
         }.click()
+        recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
         if (skill is Skill.CommandSpell) {
             // has an extra confirmation window
@@ -84,6 +94,7 @@ class Caster @Inject constructor(
         confirmSkillUse()
 
         if (skill is Skill.Servant && !skillRestrictionGuard.accepted(skill)) {
+            recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Failed)
             return false
         }
 
@@ -101,6 +112,7 @@ class Caster @Inject constructor(
         if (targets.contains(ServantTarget.Transform)) {
             // wait extra for Mélusine and then add her 3rd Ascension image
             if (!waitForAnimationToFinish(15.seconds)) {
+                recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Unknown)
                 return skillRestrictionGuard.recoverAfterFailedCast()
             }
             val slot = when (skill) {
@@ -111,10 +123,12 @@ class Caster @Inject constructor(
             servantTracker.melusineChangedAscension(slot)
         } else {
             if (!waitForAnimationToFinish()) {
+                recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Unknown)
                 return skillRestrictionGuard.recoverAfterFailedCast()
             }
         }
 
+        recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Confirmed)
         return true
     }
 
@@ -189,6 +203,10 @@ class Caster @Inject constructor(
     }
 
     fun orderChange(action: AutoSkillAction.OrderChange) {
+        val context = RecoveryWatchdog.Context(state.stage, state.turn, "order-change")
+        val actionId = "order-change:${action.starting}:${action.sub}"
+        if (!recovery.canSend(context, actionId)) return
+
         openMasterSkillMenu()
 
         // Click on order change skill
@@ -204,18 +222,24 @@ class Caster @Inject constructor(
         0.3.seconds.wait()
 
         locations.battle.orderChangeOkClick.click()
+        recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
         // Extra wait to allow order change dialog to close
         0.3.seconds.wait()
         // speed up animation
         locations.battle.extraInfoWindowCloseClick.click()
 
-        waitForAnimationToFinish(15.seconds)
+        if (!waitForAnimationToFinish(15.seconds)) {
+            recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Unknown)
+            skillRestrictionGuard.recoverAfterFailedCast()
+            return
+        }
 
         // Extra wait for the lag introduced by Order change
         1.seconds.wait()
 
         servantTracker.orderChanged(action.starting, action.sub)
+        recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Confirmed)
     }
 
     fun selectEnemyTarget(enemy: EnemyTarget) {
@@ -228,10 +252,19 @@ class Caster @Inject constructor(
     }
 
     fun use(np: CommandCard.NP) {
+        val context = RecoveryWatchdog.Context(state.stage, state.turn, "np-selection")
+        val actionId = "np:$np"
+        if (!recovery.canSend(context, actionId)) return
         locations.attack.clickLocation(np).click()
+        recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
         // click in top right to exit any cooldown/stun warning
         (locations.battle.extraInfoWindowCloseClick - Location(0, 400)).click()
+    }
+
+    fun confirmUse(np: CommandCard.NP) {
+        val context = RecoveryWatchdog.Context(state.stage, state.turn, "np-selection")
+        recovery.transitionAction(context, "np:$np", RecoveryWatchdog.ActionStatus.Confirmed)
     }
 
     fun use(card: CommandCard.Face) {

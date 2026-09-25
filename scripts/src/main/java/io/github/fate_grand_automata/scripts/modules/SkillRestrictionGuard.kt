@@ -4,6 +4,8 @@ import io.github.fate_grand_automata.scripts.IFgoAutomataApi
 import io.github.fate_grand_automata.scripts.Images
 import io.github.fate_grand_automata.scripts.ScriptLog
 import io.github.fate_grand_automata.scripts.models.Skill
+import io.github.fate_grand_automata.scripts.models.battle.BattleState
+import io.github.fate_grand_automata.scripts.models.FieldSlot
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.seconds
@@ -17,8 +19,26 @@ import kotlin.time.Duration.Companion.seconds
  */
 @ScriptScope
 class SkillRestrictionGuard @Inject constructor(
-    api: IFgoAutomataApi
+    api: IFgoAutomataApi,
+    private val state: BattleState,
+    private val recovery: RecoveryWatchdog,
+    private val servantTracker: ServantTracker,
+    private val npGaugeReader: NpGaugeReader
 ) : IFgoAutomataApi by api {
+    enum class Precondition { Allowed, InsufficientNp, UnknownNp }
+
+    fun checkBeforeClick(skill: Skill.Servant): Precondition {
+        val slot = slotForThirdSkill(skill) ?: return Precondition.Allowed
+        if (!servantTracker.isUOlga(slot)) return Precondition.Allowed
+        val result = evaluateUOlgaNp(
+            (npGaugeReader.read(slot) as? NpGaugeReader.Result.Known)?.percent
+        )
+        if (result != Precondition.Allowed) {
+            messages.log(ScriptLog.SkillPrecondition(skill, result.name))
+        }
+        return result
+    }
+
     fun accepted(skill: Skill.Servant): Boolean {
         val attackButtonVanished = locations.battle.screenCheckRegion.waitVanish(
             images[Images.BattleScreen],
@@ -28,6 +48,11 @@ class SkillRestrictionGuard @Inject constructor(
 
         messages.log(ScriptLog.SkillRestricted(skill))
         repeat(MAX_RECOVERY_ATTEMPTS) { index ->
+            val decision = recovery.request(
+                "skill-restriction",
+                RecoveryWatchdog.Context(state.stage, state.turn, skill.toString())
+            )
+            if (decision.level == RecoveryWatchdog.Level.Stop) return false
             locations.battle.extraInfoWindowCloseClick.click()
             val recovered = locations.battle.screenCheckRegion.exists(
                 images[Images.BattleScreen],
@@ -42,6 +67,11 @@ class SkillRestrictionGuard @Inject constructor(
 
     fun recoverAfterFailedCast(): Boolean {
         repeat(MAX_RECOVERY_ATTEMPTS) { index ->
+            val decision = recovery.request(
+                "skill-cast",
+                RecoveryWatchdog.Context(state.stage, state.turn, "skill-cast")
+            )
+            if (decision.level == RecoveryWatchdog.Level.Stop) return false
             locations.battle.extraInfoWindowCloseClick.click()
             val recovered = locations.battle.screenCheckRegion.exists(
                 images[Images.BattleScreen],
@@ -58,5 +88,18 @@ class SkillRestrictionGuard @Inject constructor(
         val RECOVERY_TIMEOUT = 1.seconds
 
         fun shouldSkip(attackButtonVanished: Boolean) = !attackButtonVanished
+
+        fun evaluateUOlgaNp(percent: Int?) = when {
+            percent == null -> Precondition.UnknownNp
+            percent >= 100 -> Precondition.Allowed
+            else -> Precondition.InsufficientNp
+        }
+
+        fun slotForThirdSkill(skill: Skill.Servant) = when (skill) {
+            Skill.Servant.A3 -> FieldSlot.A
+            Skill.Servant.B3 -> FieldSlot.B
+            Skill.Servant.C3 -> FieldSlot.C
+            else -> null
+        }
     }
 }

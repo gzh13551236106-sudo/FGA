@@ -164,6 +164,36 @@ class BraveChainsTest {
     }
 
     @Test
+    fun sameServantModeDegradesForOneTurnWithoutChangingLaterStrategy() {
+        val selector = ApplyBraveChains()
+        val degraded = lineup1.map { it.copy(servant = TeamSlot.Unknown, fieldSlot = null) }
+
+        val degradedPick = selector.pick(
+            degraded,
+            BraveChainEnum.SameServantBusterQuickArts
+        ).map { it.type }
+        assertThat(degradedPick).containsExactly(
+            CardTypeEnum.Buster,
+            CardTypeEnum.Quick,
+            CardTypeEnum.Quick,
+            CardTypeEnum.Arts,
+            CardTypeEnum.Arts
+        )
+
+        val normalPick = selector.pick(
+            lineup1,
+            BraveChainEnum.SameServantBusterQuickArts
+        ).map { it.card }
+        assertThat(normalPick).containsExactly(
+            CommandCard.Face.A,
+            CommandCard.Face.E,
+            CommandCard.Face.B,
+            CommandCard.Face.C,
+            CommandCard.Face.D
+        )
+    }
+
+    @Test
     fun braveChainsRearrangeWith2MatchingCards() {
         val braveChains = ApplyBraveChains()
 

@@ -15,6 +15,20 @@ class ApplyBraveChains @Inject constructor() {
         cards: List<ParsedCard>,
         npUsage: NPUsage
     ): List<ParsedCard> {
+        val typeOrder = mapOf(
+            CardTypeEnum.Buster to 0,
+            CardTypeEnum.Quick to 1,
+            CardTypeEnum.Arts to 2,
+            CardTypeEnum.Unknown to 3
+        )
+        val stableTypeOrder: (List<ParsedCard>) -> List<ParsedCard> = { items ->
+            items.withIndex()
+                .sortedWith(compareBy<IndexedValue<ParsedCard>> { typeOrder.getValue(it.value.type) }
+                    .thenBy { it.index })
+                .map { it.value }
+        }
+        if (cards.any { it.fieldSlot == null }) return stableTypeOrder(cards)
+
         val groups = cards
             .filter { it.fieldSlot != null }
             .groupBy { it.fieldSlot }
@@ -28,13 +42,7 @@ class ApplyBraveChains @Inject constructor() {
                 ?.value
             ?: return cards
 
-        val typeOrder = mapOf(
-            CardTypeEnum.Buster to 0,
-            CardTypeEnum.Quick to 1,
-            CardTypeEnum.Arts to 2,
-            CardTypeEnum.Unknown to 3
-        )
-        val orderedPreferred = preferred.sortedBy { typeOrder.getValue(it.type) }
+        val orderedPreferred = stableTypeOrder(preferred)
 
         return orderedPreferred + (cards - preferred)
     }

@@ -21,7 +21,8 @@ import kotlin.time.Duration.Companion.seconds
 class Caster @Inject constructor(
     api: IFgoAutomataApi,
     private val state: BattleState,
-    private val servantTracker: ServantTracker
+    private val servantTracker: ServantTracker,
+    private val skillRestrictionGuard: SkillRestrictionGuard
 ) : IFgoAutomataApi by api {
     private var skillConfirmation: Boolean? = null
 
@@ -35,11 +36,11 @@ class Caster @Inject constructor(
         return weCanSpam || weAreInDanger
     }
 
-    private fun waitForAnimationToFinish(timeout: Duration = 5.seconds) {
+    private fun waitForAnimationToFinish(timeout: Duration = 5.seconds): Boolean {
         val img = images[Images.BattleScreen]
         // slow devices need this. do not remove.
         locations.battle.screenCheckRegion.waitVanish(img, 2.seconds)
-        locations.battle.screenCheckRegion.exists(img, timeout)
+        return locations.battle.screenCheckRegion.exists(img, timeout)
     }
 
     private fun confirmCommandSpell(): Boolean = locations.battle.master.cancelCommandSpellRegion.exists(
@@ -59,7 +60,7 @@ class Caster @Inject constructor(
     private fun castSkill(skill: Skill, target: ServantTarget?) =
         castSkill(skill, listOfNotNull(target))
 
-    private fun castSkill(skill: Skill, targets: List<ServantTarget>) {
+    private fun castSkill(skill: Skill, targets: List<ServantTarget>): Boolean {
         when (skill) {
             is Skill.Master -> locations.battle.master.locate(skill)
             is Skill.Servant -> locations.battle.locate(skill)
@@ -82,6 +83,10 @@ class Caster @Inject constructor(
 
         confirmSkillUse()
 
+        if (skill is Skill.Servant && !skillRestrictionGuard.accepted(skill)) {
+            return false
+        }
+
         targets.forEach { target ->
             prefs.skillDelay.wait()
 
@@ -95,7 +100,9 @@ class Caster @Inject constructor(
 
         if (targets.contains(ServantTarget.Transform)) {
             // wait extra for Mélusine and then add her 3rd Ascension image
-            waitForAnimationToFinish(15.seconds)
+            if (!waitForAnimationToFinish(15.seconds)) {
+                return skillRestrictionGuard.recoverAfterFailedCast()
+            }
             val slot = when (skill) {
                 Skill.Servant.B3 -> FieldSlot.B
                 Skill.Servant.C3 -> FieldSlot.C
@@ -103,8 +110,12 @@ class Caster @Inject constructor(
             }
             servantTracker.melusineChangedAscension(slot)
         } else {
-            waitForAnimationToFinish()
+            if (!waitForAnimationToFinish()) {
+                return skillRestrictionGuard.recoverAfterFailedCast()
+            }
         }
+
+        return true
     }
 
     fun castServantSkill(skill: Skill.Servant, target: ServantTarget?) =

@@ -12,6 +12,7 @@ import io.github.lib_automata.Pattern
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 @ScriptScope
 class ServantTracker @Inject constructor(
@@ -102,16 +103,45 @@ class ServantTracker @Inject constructor(
         if (prefs.skipServantFaceCardCheck || (!addAnotherImage && teamSlot in faceCardImages))
             return
 
-        // Open details dialog and click on INFO
-        locations.battle.servantOpenDetailsClick(slot).click()
+        // Open details dialog and click on INFO. Confirm that the battle controls vanished before
+        // sampling, otherwise a lagged tap could save an unrelated piece of the battle screen.
+        val opened = (1..DETAILS_MAX_ATTEMPTS).any { attempt ->
+            locations.battle.servantOpenDetailsClick(slot).click()
+            val success = locations.battle.screenCheckRegion.waitVanish(
+                images[Images.BattleScreen],
+                DETAILS_TIMEOUT
+            )
+            messages.log(ScriptLog.Recovery("servant-details-open", attempt, success))
+            success
+        }
+        if (!opened) return
+
         locations.battle.servantDetailsInfoClick.click()
 
         250.milliseconds.wait()
 
         val image = locations.battle.servantDetailsFaceCardRegion.getPattern("Face $teamSlot")
 
-        // Close dialog
-        locations.battle.extraInfoWindowCloseClick.click()
+        // Closing can occasionally be swallowed while the details animation is running. Confirm
+        // that battle controls return and retry a bounded number of times.
+        val closed = (1..DETAILS_MAX_ATTEMPTS).any { attempt ->
+            locations.battle.extraInfoWindowCloseClick.click()
+            val success = locations.battle.screenCheckRegion.exists(
+                images[Images.BattleScreen],
+                DETAILS_TIMEOUT
+            )
+            messages.log(ScriptLog.Recovery("servant-details-close", attempt, success))
+            success
+        }
+        if (!closed) {
+            // Last safe recovery: the same top-right tap closes all battle overlays. Do not keep
+            // sampling or clicking skills while the details screen may still be present.
+            locations.battle.extraInfoWindowCloseClick.click()
+            if (!locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], DETAILS_TIMEOUT)) {
+                image.close()
+                throw IllegalStateException("Unable to close servant details after $DETAILS_MAX_ATTEMPTS attempts")
+            }
+        }
 
         faceCardImages.getOrPut(teamSlot) { mutableListOf() }
             .add(image)
@@ -263,4 +293,9 @@ class ServantTracker @Inject constructor(
      */
     private fun isSupport(slot: FieldSlot) = !prefs.treatSupportLikeOwnServant &&
             images[Images.ServantCheckSupport] in locations.battle.servantChangeSupportCheckRegion(slot)
+
+    private companion object {
+        const val DETAILS_MAX_ATTEMPTS = 3
+        val DETAILS_TIMEOUT = 2.seconds
+    }
 }

@@ -1,6 +1,7 @@
 package io.github.fate_grand_automata.scripts.modules
 
 import io.github.fate_grand_automata.scripts.enums.BraveChainEnum
+import io.github.fate_grand_automata.scripts.enums.CardTypeEnum
 import io.github.fate_grand_automata.scripts.models.NPUsage
 import io.github.fate_grand_automata.scripts.models.ParsedCard
 import io.github.fate_grand_automata.scripts.models.toFieldSlot
@@ -10,6 +11,34 @@ import javax.inject.Inject
 
 @ScriptScope
 class ApplyBraveChains @Inject constructor() {
+    private fun sameServantBusterQuickArts(
+        cards: List<ParsedCard>,
+        npUsage: NPUsage
+    ): List<ParsedCard> {
+        val groups = cards
+            .filter { it.fieldSlot != null }
+            .groupBy { it.fieldSlot }
+            .values
+
+        val npSlot = npUsage.nps.firstOrNull()?.toFieldSlot()
+        val preferred = groups.firstOrNull { group -> group.first().fieldSlot == npSlot }
+            ?: groups.withIndex()
+                .maxWithOrNull(compareBy<IndexedValue<List<ParsedCard>>> { it.value.size }
+                    .thenBy { -it.index })
+                ?.value
+            ?: return cards
+
+        val typeOrder = mapOf(
+            CardTypeEnum.Buster to 0,
+            CardTypeEnum.Quick to 1,
+            CardTypeEnum.Arts to 2,
+            CardTypeEnum.Unknown to 3
+        )
+        val orderedPreferred = preferred.sortedBy { typeOrder.getValue(it.type) }
+
+        return orderedPreferred + (cards - preferred)
+    }
+
     private fun rearrange(
         cards: List<ParsedCard>,
         rearrange: Boolean,
@@ -175,6 +204,11 @@ class ApplyBraveChains @Inject constructor() {
             BraveChainEnum.Avoid -> avoid(
                 cards = cards,
                 rearrange = rearrange
+            )
+
+            BraveChainEnum.SameServantBusterQuickArts -> sameServantBusterQuickArts(
+                cards = cards,
+                npUsage = npUsage
             )
         }
 

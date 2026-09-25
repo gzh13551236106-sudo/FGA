@@ -81,13 +81,23 @@ class Battle @Inject constructor(
         val npUsage = autoSkill.execute(state.stage, state.turn)
         skillSpam.spamSkills()
 
-        val cards = clickAttack()
+        val cards = readCardsWithRecovery()
             .takeUnless { shouldShuffle(it, npUsage) }
             ?: shuffleCards()
 
         card.clickCommandCards(cards, npUsage)
 
         0.5.seconds.wait()
+    }
+
+    private fun readCardsWithRecovery(): List<ParsedCard> = try {
+        clickAttack()
+    } catch (_: CardParser.RecognitionException) {
+        // Leave the card screen and reopen it to force FGO to redraw all five cards before the
+        // final bounded set of recognition attempts.
+        locations.attack.backClick.click()
+        locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], 2.seconds)
+        clickAttack()
     }
 
     private fun shouldShuffle(cards: List<ParsedCard>, npUsage: NPUsage): Boolean {

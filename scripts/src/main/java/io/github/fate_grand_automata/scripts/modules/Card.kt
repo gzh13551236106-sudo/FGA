@@ -12,6 +12,7 @@ import io.github.fate_grand_automata.scripts.models.battle.BattleState
 import io.github.fate_grand_automata.scripts.prefs.IBattleConfig
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 
 @ScriptScope
 class Card @Inject constructor(
@@ -26,8 +27,20 @@ class Card @Inject constructor(
     private val battleConfig: IBattleConfig
 ) : IFgoAutomataApi by api {
 
-    fun readCommandCards(): List<ParsedCard> = useSameSnapIn {
-        parser.parse()
+    fun readCommandCards(): List<ParsedCard> {
+        var lastCards = emptyList<ParsedCard>()
+        repeat(CARD_RECOGNITION_ATTEMPTS) {
+            lastCards = useSameSnapIn { parser.parse() }
+            if (parser.isReliable(lastCards)) return lastCards
+            CARD_RECOGNITION_RETRY_DELAY.wait()
+        }
+
+        throw CardParser.RecognitionException(lastCards)
+    }
+
+    private companion object {
+        const val CARD_RECOGNITION_ATTEMPTS = 3
+        val CARD_RECOGNITION_RETRY_DELAY = 300.milliseconds
     }
 
     private val spamNps: Set<CommandCard.NP>

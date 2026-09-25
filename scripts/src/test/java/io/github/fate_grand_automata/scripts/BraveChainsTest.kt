@@ -6,10 +6,26 @@ import assertk.assertions.isEqualTo
 import io.github.fate_grand_automata.scripts.enums.BraveChainEnum
 import io.github.fate_grand_automata.scripts.models.CommandCard
 import io.github.fate_grand_automata.scripts.models.NPUsage
+import io.github.fate_grand_automata.scripts.enums.CardTypeEnum
+import io.github.fate_grand_automata.scripts.models.FieldSlot
+import io.github.fate_grand_automata.scripts.models.ParsedCard
+import io.github.fate_grand_automata.scripts.models.TeamSlot
 import io.github.fate_grand_automata.scripts.modules.ApplyBraveChains
 import kotlin.test.Test
 
 class BraveChainsTest {
+    private fun card(
+        card: CommandCard.Face,
+        servant: TeamSlot,
+        slot: FieldSlot,
+        type: CardTypeEnum
+    ) = ParsedCard(
+        card = card,
+        servant = servant,
+        fieldSlot = slot,
+        type = type
+    )
+
     private fun shouldReturnSame(mode: BraveChainEnum) {
         val braveChains = ApplyBraveChains()
 
@@ -96,6 +112,55 @@ class BraveChainsTest {
         ).map { it.card }
 
         assertThat(picked).containsExactly(CommandCard.Face.A, CommandCard.Face.E, CommandCard.Face.B, CommandCard.Face.C, CommandCard.Face.D)
+    }
+
+    @Test
+    fun sameServantPrefersThreeCardsAndOrdersBusterQuickArts() {
+        val cards = listOf(
+            card(CommandCard.Face.A, TeamSlot.A, FieldSlot.A, CardTypeEnum.Arts),
+            card(CommandCard.Face.B, TeamSlot.B, FieldSlot.B, CardTypeEnum.Buster),
+            card(CommandCard.Face.C, TeamSlot.A, FieldSlot.A, CardTypeEnum.Quick),
+            card(CommandCard.Face.D, TeamSlot.B, FieldSlot.B, CardTypeEnum.Arts),
+            card(CommandCard.Face.E, TeamSlot.A, FieldSlot.A, CardTypeEnum.Buster)
+        )
+
+        val picked = ApplyBraveChains().pick(
+            cards,
+            BraveChainEnum.SameServantBusterQuickArts
+        ).map { it.card }
+
+        assertThat(picked).containsExactly(
+            CommandCard.Face.E,
+            CommandCard.Face.C,
+            CommandCard.Face.A,
+            CommandCard.Face.B,
+            CommandCard.Face.D
+        )
+    }
+
+    @Test
+    fun sameServantPrefersNpOwnerBeforeLargerGroup() {
+        val cards = listOf(
+            card(CommandCard.Face.A, TeamSlot.A, FieldSlot.A, CardTypeEnum.Arts),
+            card(CommandCard.Face.B, TeamSlot.B, FieldSlot.B, CardTypeEnum.Arts),
+            card(CommandCard.Face.C, TeamSlot.A, FieldSlot.A, CardTypeEnum.Buster),
+            card(CommandCard.Face.D, TeamSlot.C, FieldSlot.C, CardTypeEnum.Quick),
+            card(CommandCard.Face.E, TeamSlot.A, FieldSlot.A, CardTypeEnum.Quick)
+        )
+
+        val picked = ApplyBraveChains().pick(
+            cards,
+            BraveChainEnum.SameServantBusterQuickArts,
+            npUsage = NPUsage(setOf(CommandCard.NP.B), 0)
+        ).map { it.card }
+
+        assertThat(picked).containsExactly(
+            CommandCard.Face.B,
+            CommandCard.Face.A,
+            CommandCard.Face.C,
+            CommandCard.Face.D,
+            CommandCard.Face.E
+        )
     }
 
     @Test

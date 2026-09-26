@@ -27,6 +27,17 @@ class SkillRestrictionGuard @Inject constructor(
 ) : IFgoAutomataApi by api {
     enum class Precondition { Allowed, InsufficientNp, UnknownNp }
 
+    private fun closeRestrictionDialogIfPresent(): Boolean {
+        val closeVisible = locations.battle.extraInfoWindowCloseRegion.exists(
+            images[Images.Close],
+            timeout = DIALOG_DETECT_TIMEOUT
+        )
+        if (closeVisible) {
+            locations.battle.extraInfoWindowCloseClick.click()
+        }
+        return closeVisible
+    }
+
     fun checkBeforeClick(skill: Skill.Servant): Precondition {
         val slot = slotForThirdSkill(skill) ?: return Precondition.Allowed
         if (!servantTracker.isUOlga(slot)) return Precondition.Allowed
@@ -53,7 +64,7 @@ class SkillRestrictionGuard @Inject constructor(
                 RecoveryWatchdog.Context(state.stage, state.turn, skill.toString())
             )
             if (decision.level == RecoveryWatchdog.Level.Stop) return false
-            locations.battle.extraInfoWindowCloseClick.click()
+            closeRestrictionDialogIfPresent()
             val recovered = locations.battle.screenCheckRegion.exists(
                 images[Images.BattleScreen],
                 RECOVERY_TIMEOUT
@@ -72,7 +83,7 @@ class SkillRestrictionGuard @Inject constructor(
                 RecoveryWatchdog.Context(state.stage, state.turn, "skill-cast")
             )
             if (decision.level == RecoveryWatchdog.Level.Stop) return false
-            locations.battle.extraInfoWindowCloseClick.click()
+            closeRestrictionDialogIfPresent()
             val recovered = locations.battle.screenCheckRegion.exists(
                 images[Images.BattleScreen],
                 RECOVERY_TIMEOUT
@@ -86,6 +97,7 @@ class SkillRestrictionGuard @Inject constructor(
     internal companion object {
         const val MAX_RECOVERY_ATTEMPTS = 3
         val RECOVERY_TIMEOUT = 1.seconds
+        val DIALOG_DETECT_TIMEOUT = 0.25.seconds
 
         fun shouldSkip(attackButtonVanished: Boolean) = !attackButtonVanished
 

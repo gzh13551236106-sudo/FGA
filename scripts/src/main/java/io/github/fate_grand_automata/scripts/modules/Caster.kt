@@ -58,6 +58,28 @@ class Caster @Inject constructor(
         }
     }
 
+    private fun closeExtraInfoIfPresent(timeout: Duration = 0.2.seconds): Boolean {
+        val closeVisible = locations.battle.extraInfoWindowCloseRegion.exists(
+            images[Images.Close],
+            timeout = timeout
+        )
+        if (closeVisible) {
+            locations.battle.extraInfoWindowCloseClick.click()
+        }
+        return closeVisible
+    }
+
+    private fun closeNpWarningIfPresent(timeout: Duration = 0.2.seconds): Boolean {
+        val closeVisible = locations.battle.npWarningCloseRegion.exists(
+            images[Images.Close],
+            timeout = timeout
+        )
+        if (closeVisible) {
+            locations.battle.npWarningCloseClick.click()
+        }
+        return closeVisible
+    }
+
     private fun castSkill(skill: Skill, target: ServantTarget?) =
         castSkill(skill, listOfNotNull(target))
 
@@ -104,10 +126,9 @@ class Caster @Inject constructor(
             selectSkillTarget(target)
         }
 
-        // Close the window that opens up if skill is on cool-down
-        // Also triggers skill speedup for FGO servers with that feature
-        // If we wait for too long here, the vanishing Attack button will not be detected in waitForAnimationToFinish()
-        locations.battle.extraInfoWindowCloseClick.click()
+        // Only close a dialog when its close icon is actually visible. A blind tap here can land
+        // on the live battle HUD and open servant/status details.
+        closeExtraInfoIfPresent()
 
         if (targets.contains(ServantTarget.Transform)) {
             // wait extra for Mélusine and then add her 3rd Ascension image
@@ -224,10 +245,9 @@ class Caster @Inject constructor(
         locations.battle.orderChangeOkClick.click()
         recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
-        // Extra wait to allow order change dialog to close
+        // Extra wait to allow order change dialog to close. Do not blind-tap the battle HUD.
         0.3.seconds.wait()
-        // speed up animation
-        locations.battle.extraInfoWindowCloseClick.click()
+        closeExtraInfoIfPresent()
 
         if (!waitForAnimationToFinish(15.seconds)) {
             recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Unknown)
@@ -248,7 +268,7 @@ class Caster @Inject constructor(
         0.5.seconds.wait()
 
         // Exit any extra menu
-        locations.battle.extraInfoWindowCloseClick.click()
+        closeExtraInfoIfPresent()
     }
 
     fun use(np: CommandCard.NP) {
@@ -258,8 +278,8 @@ class Caster @Inject constructor(
         locations.attack.clickLocation(np).click()
         recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
-        // click in top right to exit any cooldown/stun warning
-        (locations.battle.extraInfoWindowCloseClick - Location(0, 400)).click()
+        // Exit a cooldown/stun warning only when its close icon is confirmed.
+        closeNpWarningIfPresent()
     }
 
     fun confirmUse(np: CommandCard.NP) {

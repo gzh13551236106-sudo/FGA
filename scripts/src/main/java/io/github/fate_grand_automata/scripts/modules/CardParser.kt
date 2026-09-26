@@ -75,8 +75,62 @@ class CardParser @Inject constructor(
         return CardTypeEnum.Unknown
     }
 
+    private fun visualGroups(): Map<CommandCard.Face, Int> {
+        if (prefs.skipServantFaceCardCheck) return emptyMap()
+
+        val cards = CommandCard.Face.list
+        val parent = IntArray(cards.size) { it }
+
+        fun root(index: Int): Int {
+            var current = index
+            while (parent[current] != current) {
+                parent[current] = parent[parent[current]]
+                current = parent[current]
+            }
+            return current
+        }
+
+        fun union(left: Int, right: Int) {
+            val leftRoot = root(left)
+            val rightRoot = root(right)
+            if (leftRoot != rightRoot) parent[rightRoot] = leftRoot
+        }
+
+        val seeds = cards.associateWith { card ->
+            locations.attack.servantIdentitySeedRegion(card)
+                .getPattern("CommandCardIdentity:$card")
+        }
+
+        try {
+            for (i in cards.indices) {
+                for (j in i + 1 until cards.size) {
+                    val left = cards[i]
+                    val right = cards[j]
+                    val leftInRight = locations.attack.servantIdentitySearchRegion(right)
+                        .find(seeds.getValue(left), VISUAL_GROUP_SIMILARITY) != null
+                    val rightInLeft = locations.attack.servantIdentitySearchRegion(left)
+                        .find(seeds.getValue(right), VISUAL_GROUP_SIMILARITY) != null
+
+                    if (leftInRight && rightInLeft) {
+                        union(i, j)
+                    }
+                }
+            }
+
+            val normalized = mutableMapOf<Int, Int>()
+            var nextGroup = 0
+            return cards.mapIndexed { index, card ->
+                val group = normalized.getOrPut(root(index)) { nextGroup++ }
+                card to group
+            }.toMap()
+        } finally {
+            seeds.values.forEach { it.close() }
+        }
+    }
+
     fun parse(): List<ParsedCard> {
         val cardsGroupedByServant = servantTracker.faceCardsGroupedByServant()
+        val visualGroups = visualGroups()
 
         val cards = CommandCard.Face.list
             .map {
@@ -105,7 +159,8 @@ class CardParser @Inject constructor(
                     type = type,
                     affinity = affinity,
                     servant = servant,
-                    fieldSlot = fieldSlot
+                    fieldSlot = fieldSlot,
+                    visualGroup = visualGroups[it]
                 )
             }
 
@@ -120,7 +175,9 @@ class CardParser @Inject constructor(
                         true
                     }
 
-                    it.servant is TeamSlot.Unknown && !prefs.skipServantFaceCardCheck -> {
+                    it.servant is TeamSlot.Unknown &&
+                        it.visualGroup == null &&
+                        !prefs.skipServantFaceCardCheck -> {
                         unknownServants = true
                         true
                     }
@@ -143,6 +200,10 @@ class CardParser @Inject constructor(
         cards = cards,
         checkServant = !prefs.skipServantFaceCardCheck
     )
+
+    private companion object {
+        const val VISUAL_GROUP_SIMILARITY = 0.76
+    }
 }
 
 internal object CommandCardRecognition {
@@ -151,7 +212,9 @@ internal object CommandCardRecognition {
             return CardParser.Result.Unsafe(cards, CardParser.Reason.IncompleteSlots)
         }
         val unknownTypes = cards.count { !it.isStunned && it.type == CardTypeEnum.Unknown }
-        val unknownServants = checkServant && cards.any { !it.isStunned && it.servant is TeamSlot.Unknown }
+        val unknownServants = checkServant && cards.any {
+            !it.isStunned && it.servant is TeamSlot.Unknown && it.visualGroup == null
+        }
         val reasons = buildSet {
             if (unknownTypes > 0) add(CardParser.Reason.UnknownCardType)
             if (unknownServants) add(CardParser.Reason.UnknownServant)

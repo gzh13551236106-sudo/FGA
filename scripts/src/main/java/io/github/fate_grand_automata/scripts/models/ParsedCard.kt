@@ -7,10 +7,10 @@ data class ParsedCard(
     val card: CommandCard.Face,
     val servant: TeamSlot,
     val fieldSlot: FieldSlot?,
-    val visualGroup: Int? = null,
     val type: CardTypeEnum,
     val affinity: CardAffinityEnum = CardAffinityEnum.Normal,
-    val isStunned: Boolean = false
+    val isStunned: Boolean = false,
+    val visualGroup: Int? = null
 ) {
     override fun equals(other: Any?) =
         other is ParsedCard && card == other.card

@@ -39,12 +39,19 @@ class ApplyBraveChains @Inject constructor() {
         if (groups.isEmpty()) return stableTypeOrder(cards)
 
         val npSlot = npUsage.nps.firstOrNull()?.toFieldSlot()
-        val preferred = groups.firstOrNull { group ->
+        val npPreferred = groups.firstOrNull { group ->
             npSlot != null && group.any { it.fieldSlot == npSlot }
-        } ?: groups.withIndex()
+        }
+        val largestGroup = groups.withIndex()
             .maxWithOrNull(compareBy<IndexedValue<List<ParsedCard>>> { it.value.size }
                 .thenBy { -it.index })
             ?.value
+
+        // If visual recognition produced five unrelated singleton groups, do not pretend that the
+        // first card is a reliable same-servant match. Fall back to the requested Buster/Quick/Arts
+        // ordering for this turn. A known NP owner remains a valid explicit preference.
+        val preferred = npPreferred
+            ?: largestGroup?.takeIf { it.size > 1 }
             ?: return stableTypeOrder(cards)
 
         val orderedPreferred = stableTypeOrder(preferred)

@@ -27,20 +27,25 @@ class ApplyBraveChains @Inject constructor() {
                     .thenBy { it.index })
                 .map { it.value }
         }
-        if (cards.any { it.fieldSlot == null }) return stableTypeOrder(cards)
-
         val groups = cards
-            .filter { it.fieldSlot != null }
-            .groupBy { it.fieldSlot }
+            .mapNotNull { card ->
+                val key = card.fieldSlot?.let { "slot:$it" }
+                    ?: card.visualGroup?.let { "visual:$it" }
+                key?.let { it to card }
+            }
+            .groupBy({ it.first }, { it.second })
             .values
 
+        if (groups.isEmpty()) return stableTypeOrder(cards)
+
         val npSlot = npUsage.nps.firstOrNull()?.toFieldSlot()
-        val preferred = groups.firstOrNull { group -> group.first().fieldSlot == npSlot }
-            ?: groups.withIndex()
-                .maxWithOrNull(compareBy<IndexedValue<List<ParsedCard>>> { it.value.size }
-                    .thenBy { -it.index })
-                ?.value
-            ?: return cards
+        val preferred = groups.firstOrNull { group ->
+            npSlot != null && group.any { it.fieldSlot == npSlot }
+        } ?: groups.withIndex()
+            .maxWithOrNull(compareBy<IndexedValue<List<ParsedCard>>> { it.value.size }
+                .thenBy { -it.index })
+            ?.value
+            ?: return stableTypeOrder(cards)
 
         val orderedPreferred = stableTypeOrder(preferred)
 

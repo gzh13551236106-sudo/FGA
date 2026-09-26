@@ -4,7 +4,6 @@ import io.github.fate_grand_automata.SupportImageKind
 import io.github.fate_grand_automata.scripts.IFgoAutomataApi
 import io.github.fate_grand_automata.scripts.Images
 import io.github.fate_grand_automata.scripts.ScriptLog
-import io.github.fate_grand_automata.scripts.entrypoints.AutoBattle
 import io.github.fate_grand_automata.scripts.models.CommandCard
 import io.github.fate_grand_automata.scripts.models.FieldSlot
 import io.github.fate_grand_automata.scripts.models.OrderChangeMember
@@ -13,8 +12,6 @@ import io.github.fate_grand_automata.scripts.models.skills
 import io.github.lib_automata.Pattern
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
 
 @ScriptScope
 class ServantTracker @Inject constructor(
@@ -59,12 +56,10 @@ class ServantTracker @Inject constructor(
     val checkImages = mutableMapOf<TeamSlot, TeamSlotData>()
     private var supportSlot: TeamSlot? = null
 
-    private val faceCardImages = mutableMapOf<TeamSlot, MutableList<Pattern>>()
     private val uOlgaSlots = mutableSetOf<TeamSlot>()
 
     override fun close() {
         checkImages.values.forEach { it.close() }
-        faceCardImages.values.flatten().forEach { it.close() }
         checkImages.clear()
     }
 
@@ -77,7 +72,7 @@ class ServantTracker @Inject constructor(
         )
 
         var isSupport = false
-        // use same screenshot for support + face detection
+        // Use only the battle HUD. Never open the servant status/details dialog for identification.
         useSameSnapIn {
             isSupport = isSupport(slot)
 
@@ -93,85 +88,27 @@ class ServantTracker @Inject constructor(
                     }
                 )
             }
+
+            updateUOlgaIdentity(teamSlot, slot)
         }
 
         if (supportSlot == null && isSupport) {
             supportSlot = teamSlot
-        } else if (!isSupport) {
-            // Don't useSameSnapIn here, since we open a dialog
-            initFaceCard(teamSlot, slot)
         }
     }
 
-    private fun initFaceCard(teamSlot: TeamSlot, slot: FieldSlot, addAnotherImage: Boolean = false) {
-        if (prefs.skipServantFaceCardCheck || (!addAnotherImage && teamSlot in faceCardImages))
-            return
-
-        // Open details dialog and click on INFO. Confirm that the battle controls vanished before
-        // sampling, otherwise a lagged tap could save an unrelated piece of the battle screen.
-        val opened = (1..DETAILS_MAX_ATTEMPTS).any { attempt ->
-            locations.battle.servantOpenDetailsClick(slot).click()
-            val success = locations.battle.screenCheckRegion.waitVanish(
-                images[Images.BattleScreen],
-                DETAILS_TIMEOUT
-            )
-            messages.log(ScriptLog.Recovery("servant-details-open", attempt, success))
-            if (!success) {
-                val decision = recovery.request(
-                    "servant-details-open",
-                    RecoveryWatchdog.Context(-1, -1, "details:$slot")
-                )
-                if (decision.level == RecoveryWatchdog.Level.Stop) return@any false
-            }
-            success
-        }
-        if (!opened) return
-
-        locations.battle.servantDetailsInfoClick.click()
-
-        250.milliseconds.wait()
-
-        val image = locations.battle.servantDetailsFaceCardRegion.getPattern("Face $teamSlot")
+    private fun updateUOlgaIdentity(teamSlot: TeamSlot, slot: FieldSlot) {
+        val region = locations.battle.servantChangeSupportCheckRegion(slot)
         val isUOlga = images.loadSupportPattern(SupportImageKind.Servant, U_OLGA_NAME)
-            .any { portrait -> portrait.findMatches(image, prefs.platformPrefs.minSimilarity).any() }
-        if (isUOlga) uOlgaSlots += teamSlot else uOlgaSlots -= teamSlot
-
-        // Closing can occasionally be swallowed while the details animation is running. Confirm
-        // that battle controls return and retry a bounded number of times.
-        val closed = (1..DETAILS_MAX_ATTEMPTS).any { attempt ->
-            locations.battle.extraInfoWindowCloseClick.click()
-            val success = locations.battle.screenCheckRegion.exists(
-                images[Images.BattleScreen],
-                DETAILS_TIMEOUT
-            )
-            messages.log(ScriptLog.Recovery("servant-details-close", attempt, success))
-            if (!success) {
-                val decision = recovery.request(
-                    "servant-details-close",
-                    RecoveryWatchdog.Context(-1, -1, "details:$slot")
-                )
-                if (decision.level == RecoveryWatchdog.Level.Stop) return@any false
+            .any { portrait ->
+                region.find(portrait, similarity = U_OLGA_BATTLE_SIMILARITY) != null
             }
-            success
-        }
-        if (!closed) {
-            // Last safe recovery: the same top-right tap closes all battle overlays. Do not keep
-            // sampling or clicking skills while the details screen may still be present.
-            locations.battle.extraInfoWindowCloseClick.click()
-            if (!locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], DETAILS_TIMEOUT)) {
-                image.close()
-                throw AutoBattle.BattleExitException(
-                    AutoBattle.ExitReason.RecoveryExhausted(
-                        "Unable to close servant details after $DETAILS_MAX_ATTEMPTS attempts"
-                    )
-                )
-            }
-        }
 
-        faceCardImages.getOrPut(teamSlot) { mutableListOf() }
-            .add(image)
-
-        250.milliseconds.wait()
+        if (isUOlga) {
+            uOlgaSlots += teamSlot
+        } else {
+            uOlgaSlots -= teamSlot
+        }
     }
 
     private fun check(slot: FieldSlot) {
@@ -251,39 +188,22 @@ class ServantTracker @Inject constructor(
             return emptyMap()
         }
 
-        val cardsRemaining = CommandCard.Face.list.toMutableSet()
         val result = mutableMapOf<TeamSlot, Set<CommandCard.Face>>()
 
+        // Support cards can still be identified from the support marker already present on the
+        // command-card screen. Owned-servant grouping is handled visually in CardParser, so no
+        // battle overlay needs to be opened.
         supportSlot?.let { supportSlot ->
             if (supportSlot in deployed.values) {
-                val matched = cardsRemaining.filter { card ->
+                val matched = CommandCard.Face.list.filter { card ->
                     images[Images.Support] in locations.attack.supportCheckRegion(card)
                 }.toSet()
 
-                cardsRemaining -= matched
-                result[supportSlot] = matched
+                if (matched.isNotEmpty()) {
+                    result[supportSlot] = matched
+                }
             }
         }
-
-        val ownedServants = faceCardImages
-            .filterKeys { it != supportSlot && it in deployed.values }
-        cardsRemaining
-            .groupBy { card ->
-                // find the best matching Servant which isn't the support
-                ownedServants
-                    .mapValues { (_, images) ->
-                        images.maxOf { image ->
-                            locations.attack.servantMatchRegion(card)
-                                .find(image, 0.5)?.score ?: 0.0
-                        }
-                    }
-                    .filterValues { it > 0.0 }
-                    .maxByOrNull { it.value }
-                    ?.key
-            }
-            .filterKeys { it != null }
-            .entries
-            .associateTo(result) { (key, value) -> key!! to value.toSet() }
 
         result.forEach { (servant, cards) ->
             messages.log(
@@ -311,7 +231,7 @@ class ServantTracker @Inject constructor(
                     .getPattern("Melusine Asc3")
             )
 
-            initFaceCard(teamSlot, fieldSlot, addAnotherImage = true)
+            updateUOlgaIdentity(teamSlot, fieldSlot)
         }
     }
 
@@ -322,8 +242,7 @@ class ServantTracker @Inject constructor(
             images[Images.ServantCheckSupport] in locations.battle.servantChangeSupportCheckRegion(slot)
 
     private companion object {
-        const val DETAILS_MAX_ATTEMPTS = 3
-        val DETAILS_TIMEOUT = 2.seconds
         const val U_OLGA_NAME = "U-Olga Marie"
+        const val U_OLGA_BATTLE_SIMILARITY = 0.72
     }
 }

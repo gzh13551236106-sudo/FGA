@@ -3,6 +3,7 @@ package io.github.fate_grand_automata.scripts
 import io.github.fate_grand_automata.scripts.models.CommandCard
 import io.github.fate_grand_automata.scripts.models.FieldSlot
 import io.github.fate_grand_automata.scripts.models.TeamSlot
+import io.github.fate_grand_automata.scripts.models.Skill
 import kotlin.time.Duration
 
 sealed class ScriptNotify {
@@ -39,6 +40,16 @@ sealed class ScriptLog {
         val cards: Iterable<CommandCard.Face>,
         val servant: TeamSlot,
         val isSupport: Boolean = false
+    ) : ScriptLog()
+
+    class SkillRestricted(val skill: Skill.Servant) : ScriptLog()
+    class SkillPrecondition(val skill: Skill.Servant, val reason: String) : ScriptLog()
+    class Recovery(
+        val area: String,
+        val attempt: Int,
+        val succeeded: Boolean,
+        val level: String? = null,
+        val remainingBudget: Int? = null
     ) : ScriptLog()
 }
 

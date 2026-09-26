@@ -6,7 +6,6 @@ import io.github.fate_grand_automata.scripts.models.EnemyTarget
 import io.github.fate_grand_automata.scripts.models.battle.BattleState
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
-import kotlin.time.Duration.Companion.seconds
 
 @ScriptScope
 class AutoChooseTarget @Inject constructor(
@@ -23,11 +22,11 @@ class AutoChooseTarget @Inject constructor(
     }
 
     private fun chooseTarget(enemy: EnemyTarget) {
+        // Selecting an enemy is already a complete battle-screen action.
+        // Do not blindly tap the old "extra info close" coordinate afterwards:
+        // when no dialog is open that coordinate lands on the live battle UI and can
+        // open a servant/status panel at the beginning of a turn.
         locations.battle.locate(enemy).click()
-
-        0.5.seconds.wait()
-
-        locations.battle.extraInfoWindowCloseClick.click()
     }
 
     fun choose() {

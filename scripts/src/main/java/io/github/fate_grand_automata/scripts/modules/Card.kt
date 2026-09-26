@@ -12,6 +12,7 @@ import io.github.fate_grand_automata.scripts.models.battle.BattleState
 import io.github.fate_grand_automata.scripts.prefs.IBattleConfig
 import io.github.lib_automata.dagger.ScriptScope
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 
 @ScriptScope
 class Card @Inject constructor(
@@ -23,11 +24,37 @@ class Card @Inject constructor(
     private val parser: CardParser,
     private val priority: FaceCardPriority,
     private val braveChains: ApplyBraveChains,
-    private val battleConfig: IBattleConfig
+    private val battleConfig: IBattleConfig,
+    private val recovery: RecoveryWatchdog
 ) : IFgoAutomataApi by api {
 
-    fun readCommandCards(): List<ParsedCard> = useSameSnapIn {
-        parser.parse()
+    fun readCommandCards(): CardParser.Result {
+        var lastResult: CardParser.Result = CardParser.Result.Unsafe(
+            emptyList(), CardParser.Reason.IncompleteSlots
+        )
+        repeat(CARD_RECOGNITION_ATTEMPTS) { attempt ->
+            lastResult = useSameSnapIn { parser.classify(parser.parse()) }
+            if (lastResult is CardParser.Result.Normal) return lastResult
+            if (attempt < CARD_RECOGNITION_ATTEMPTS - 1 &&
+                (lastResult is CardParser.Result.NeedsRecovery || lastResult is CardParser.Result.Unsafe)
+            ) {
+                val decision = recovery.request(
+                    reason = "command-card-recognition",
+                    context = RecoveryWatchdog.Context(state.stage, state.turn, "read-cards")
+                )
+                if (decision.level == RecoveryWatchdog.Level.Stop) return CardParser.Result.Unsafe(
+                    lastResult.cards,
+                    CardParser.Reason.IncompleteSlots
+                )
+            }
+            CARD_RECOGNITION_RETRY_DELAY.wait()
+        }
+        return lastResult
+    }
+
+    private companion object {
+        const val CARD_RECOGNITION_ATTEMPTS = 3
+        val CARD_RECOGNITION_RETRY_DELAY = 300.milliseconds
     }
 
     private val spamNps: Set<CommandCard.NP>
@@ -91,5 +118,7 @@ class Card @Inject constructor(
             .drop(npUsage.cardsBeforeNP)
             .also { messages.log(ScriptLog.ClickingCards(it)) }
             .forEach { caster.use(it) }
+
+        nps.forEach { caster.confirmUse(it) }
     }
 }

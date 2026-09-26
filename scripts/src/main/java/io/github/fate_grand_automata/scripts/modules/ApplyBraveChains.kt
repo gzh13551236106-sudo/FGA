@@ -1,6 +1,7 @@
 package io.github.fate_grand_automata.scripts.modules
 
 import io.github.fate_grand_automata.scripts.enums.BraveChainEnum
+import io.github.fate_grand_automata.scripts.enums.CardTypeEnum
 import io.github.fate_grand_automata.scripts.models.NPUsage
 import io.github.fate_grand_automata.scripts.models.ParsedCard
 import io.github.fate_grand_automata.scripts.models.toFieldSlot
@@ -10,6 +11,54 @@ import javax.inject.Inject
 
 @ScriptScope
 class ApplyBraveChains @Inject constructor() {
+    private fun sameServantBusterQuickArts(
+        cards: List<ParsedCard>,
+        npUsage: NPUsage
+    ): List<ParsedCard> {
+        val typeOrder = mapOf(
+            CardTypeEnum.Buster to 0,
+            CardTypeEnum.Quick to 1,
+            CardTypeEnum.Arts to 2,
+            CardTypeEnum.Unknown to 3
+        )
+        val stableTypeOrder: (List<ParsedCard>) -> List<ParsedCard> = { items ->
+            items.withIndex()
+                .sortedWith(compareBy<IndexedValue<ParsedCard>> { typeOrder.getValue(it.value.type) }
+                    .thenBy { it.index })
+                .map { it.value }
+        }
+        val groups = cards
+            .mapNotNull { card ->
+                val key = card.fieldSlot?.let { "slot:$it" }
+                    ?: card.visualGroup?.let { "visual:$it" }
+                key?.let { it to card }
+            }
+            .groupBy({ it.first }, { it.second })
+            .values
+
+        if (groups.isEmpty()) return stableTypeOrder(cards)
+
+        val npSlot = npUsage.nps.firstOrNull()?.toFieldSlot()
+        val npPreferred = groups.firstOrNull { group ->
+            npSlot != null && group.any { it.fieldSlot == npSlot }
+        }
+        val largestGroup = groups.withIndex()
+            .maxWithOrNull(compareBy<IndexedValue<List<ParsedCard>>> { it.value.size }
+                .thenBy { -it.index })
+            ?.value
+
+        // If visual recognition produced five unrelated singleton groups, do not pretend that the
+        // first card is a reliable same-servant match. Fall back to the requested Buster/Quick/Arts
+        // ordering for this turn. A known NP owner remains a valid explicit preference.
+        val preferred = npPreferred
+            ?: largestGroup?.takeIf { it.size > 1 }
+            ?: return stableTypeOrder(cards)
+
+        val orderedPreferred = stableTypeOrder(preferred)
+
+        return orderedPreferred + (cards - preferred)
+    }
+
     private fun rearrange(
         cards: List<ParsedCard>,
         rearrange: Boolean,
@@ -175,6 +224,11 @@ class ApplyBraveChains @Inject constructor() {
             BraveChainEnum.Avoid -> avoid(
                 cards = cards,
                 rearrange = rearrange
+            )
+
+            BraveChainEnum.SameServantBusterQuickArts -> sameServantBusterQuickArts(
+                cards = cards,
+                npUsage = npUsage
             )
         }
 

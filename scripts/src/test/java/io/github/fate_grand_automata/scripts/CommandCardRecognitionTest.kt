@@ -24,6 +24,15 @@ class CommandCardRecognitionTest {
         CommandCardRecognition.classify(cards().map { it.copy(servant = TeamSlot.Unknown, fieldSlot = null) }, true)
     ).isInstanceOf(CardParser.Result.Degraded::class)
 
+    @Test fun visualGroupAvoidsUnknownServantRecovery() = assertThat(
+        CommandCardRecognition.classify(
+            cards().mapIndexed { index, card ->
+                card.copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = index / 2)
+            },
+            true
+        )
+    ).isInstanceOf(CardParser.Result.Normal::class)
+
     @Test fun oneUnknownTypeIsDegraded() = assertThat(
         CommandCardRecognition.classify(cards().mapIndexed { i, card ->
             if (i == 2) card.copy(type = CardTypeEnum.Unknown) else card

@@ -68,16 +68,33 @@ class Battle @Inject constructor(
         return card.readCommandCards()
     }
 
+    private fun ensureBattlePage(reason: String) {
+        if (locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], 1.seconds)) return
+
+        val closeVisible = locations.battle.extraInfoWindowCloseRegion.exists(
+            images[Images.Close],
+            timeout = 0.25.seconds
+        )
+        if (closeVisible) {
+            locations.battle.extraInfoWindowCloseClick.click()
+            if (locations.battle.screenCheckRegion.exists(images[Images.BattleScreen], 1.seconds)) return
+        }
+
+        recoveryStop(reason)
+    }
+
     fun performBattle() {
         prefs.waitBeforeTurn.wait()
 
         onTurnStarted()
+        ensureBattlePage("turn-start-left-battle-page")
 
         if (battleConfig.addRaidTurnDelay){
             battleConfig.raidTurnDelaySeconds.seconds.wait()
         }
 
         servantTracker.beginTurn()
+        ensureBattlePage("servant-scan-left-battle-page")
 
         val npUsage = autoSkill.execute(state.stage, state.turn)
         skillSpam.spamSkills()

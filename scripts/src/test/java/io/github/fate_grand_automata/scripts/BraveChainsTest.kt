@@ -194,6 +194,61 @@ class BraveChainsTest {
     }
 
     @Test
+    fun sameServantUsesAttackScreenVisualGroupsWithoutKnownServant() {
+        val cards = listOf(
+            card(CommandCard.Face.A, TeamSlot.A, FieldSlot.A, CardTypeEnum.Arts)
+                .copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = 7),
+            card(CommandCard.Face.B, TeamSlot.B, FieldSlot.B, CardTypeEnum.Buster)
+                .copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = 8),
+            card(CommandCard.Face.C, TeamSlot.A, FieldSlot.A, CardTypeEnum.Quick)
+                .copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = 7),
+            card(CommandCard.Face.D, TeamSlot.B, FieldSlot.B, CardTypeEnum.Arts)
+                .copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = 8),
+            card(CommandCard.Face.E, TeamSlot.A, FieldSlot.A, CardTypeEnum.Buster)
+                .copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = 7)
+        )
+
+        val picked = ApplyBraveChains().pick(
+            cards,
+            BraveChainEnum.SameServantBusterQuickArts
+        ).map { it.card }
+
+        assertThat(picked).containsExactly(
+            CommandCard.Face.E,
+            CommandCard.Face.C,
+            CommandCard.Face.A,
+            CommandCard.Face.B,
+            CommandCard.Face.D
+        )
+    }
+
+    @Test
+    fun sameServantFallsBackWhenVisualGroupsAreAllSingletons() {
+        val cards = listOf(
+            card(CommandCard.Face.A, TeamSlot.A, FieldSlot.A, CardTypeEnum.Arts),
+            card(CommandCard.Face.B, TeamSlot.B, FieldSlot.B, CardTypeEnum.Buster),
+            card(CommandCard.Face.C, TeamSlot.A, FieldSlot.A, CardTypeEnum.Quick),
+            card(CommandCard.Face.D, TeamSlot.B, FieldSlot.B, CardTypeEnum.Arts),
+            card(CommandCard.Face.E, TeamSlot.C, FieldSlot.C, CardTypeEnum.Quick)
+        ).mapIndexed { index, item ->
+            item.copy(servant = TeamSlot.Unknown, fieldSlot = null, visualGroup = index)
+        }
+
+        val picked = ApplyBraveChains().pick(
+            cards,
+            BraveChainEnum.SameServantBusterQuickArts
+        ).map { it.type }
+
+        assertThat(picked).containsExactly(
+            CardTypeEnum.Buster,
+            CardTypeEnum.Quick,
+            CardTypeEnum.Quick,
+            CardTypeEnum.Arts,
+            CardTypeEnum.Arts
+        )
+    }
+
+    @Test
     fun braveChainsRearrangeWith2MatchingCards() {
         val braveChains = ApplyBraveChains()
 

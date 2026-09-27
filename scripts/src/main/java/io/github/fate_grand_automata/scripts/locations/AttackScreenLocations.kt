@@ -69,6 +69,19 @@ class AttackScreenLocations @Inject constructor(
     fun supportCheckRegion(card: CommandCard.Face) =
         affinityRegion(card) + Location(-50, 100)
 
+    /**
+     * Small visual probe used to verify that FGO actually accepted a command-card tap.
+     *
+     * Face-card probes intentionally cover the card-type strip because the selected-order overlay
+     * and card lift both change this area. NP probes are centered on the NP card itself.
+     */
+    fun selectionProbeRegion(card: CommandCard): Region = when (card) {
+        is CommandCard.Face -> typeRegion(card)
+        is CommandCard.NP -> clickLocation(card).let { point ->
+            Region(point.x - 180, point.y - 140, 360, 280)
+        }
+    }
+
     val backClick =
         (if (isWide)
             Location(-325, 1310)

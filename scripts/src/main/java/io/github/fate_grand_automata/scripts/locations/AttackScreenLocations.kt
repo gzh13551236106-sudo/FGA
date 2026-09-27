@@ -69,6 +69,17 @@ class AttackScreenLocations @Inject constructor(
     fun supportCheckRegion(card: CommandCard.Face) =
         affinityRegion(card) + Location(-50, 100)
 
+    /**
+     * Visual probe for confirming that a command-card tap changed the Attack screen.
+     * Face cards use the card-type strip; NP cards use a compact region around the NP button.
+     */
+    fun selectionProbeRegion(card: CommandCard): Region = when (card) {
+        is CommandCard.Face -> typeRegion(card)
+        is CommandCard.NP -> clickLocation(card).let { point ->
+            Region(point.x - 180, point.y - 140, 360, 280)
+        }
+    }
+
     val backClick =
         (if (isWide)
             Location(-325, 1310)

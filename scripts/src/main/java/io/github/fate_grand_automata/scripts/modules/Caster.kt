@@ -25,6 +25,8 @@ class Caster @Inject constructor(
     private val skillRestrictionGuard: SkillRestrictionGuard,
     private val recovery: RecoveryWatchdog
 ) : IFgoAutomataApi by api {
+    enum class NpTapResult { Sent, Blocked, NotSent }
+
     private var skillConfirmation: Boolean? = null
 
     // TODO: Shouldn't be here ideally.
@@ -271,20 +273,38 @@ class Caster @Inject constructor(
         closeExtraInfoIfPresent()
     }
 
-    fun use(np: CommandCard.NP) {
+    fun use(np: CommandCard.NP): NpTapResult {
         val context = RecoveryWatchdog.Context(state.stage, state.turn, "np-selection")
         val actionId = "np:$np"
-        if (!recovery.canSend(context, actionId)) return
+        if (!recovery.canSend(context, actionId)) return NpTapResult.NotSent
+
         locations.attack.clickLocation(np).click()
         recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Sent)
 
-        // Exit a cooldown/stun warning only when its close icon is confirmed.
-        closeNpWarningIfPresent()
+        // If the game rejected the NP (seal/cooldown/other condition), close only a confirmed
+        // warning dialog and let Card.kt fill the missing command slot with a face card.
+        if (closeNpWarningIfPresent(timeout = 0.5.seconds)) {
+            recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Failed)
+            return NpTapResult.Blocked
+        }
+
+        return NpTapResult.Sent
+    }
+
+    fun rejectUse(np: CommandCard.NP) {
+        val context = RecoveryWatchdog.Context(state.stage, state.turn, "np-selection")
+        val actionId = "np:$np"
+        if (recovery.actionStatus(context, actionId) == RecoveryWatchdog.ActionStatus.Sent) {
+            recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Failed)
+        }
     }
 
     fun confirmUse(np: CommandCard.NP) {
         val context = RecoveryWatchdog.Context(state.stage, state.turn, "np-selection")
-        recovery.transitionAction(context, "np:$np", RecoveryWatchdog.ActionStatus.Confirmed)
+        val actionId = "np:$np"
+        if (recovery.actionStatus(context, actionId) == RecoveryWatchdog.ActionStatus.Sent) {
+            recovery.transitionAction(context, actionId, RecoveryWatchdog.ActionStatus.Confirmed)
+        }
     }
 
     fun use(card: CommandCard.Face) {

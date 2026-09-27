@@ -3,6 +3,7 @@ package io.github.fate_grand_automata.scripts.entrypoints
 import io.github.fate_grand_automata.scripts.IFgoAutomataApi
 import io.github.fate_grand_automata.scripts.Images
 import io.github.fate_grand_automata.scripts.ScriptNotify
+import io.github.fate_grand_automata.scripts.ScriptLog
 import io.github.fate_grand_automata.scripts.enums.GameServer
 import io.github.fate_grand_automata.scripts.enums.GameServers
 import io.github.fate_grand_automata.scripts.enums.MaterialEnum
@@ -15,6 +16,7 @@ import io.github.fate_grand_automata.scripts.modules.ConnectionRetry
 import io.github.fate_grand_automata.scripts.modules.MaterialsTracker
 import io.github.fate_grand_automata.scripts.modules.PartySelection
 import io.github.fate_grand_automata.scripts.modules.Refill
+import io.github.fate_grand_automata.scripts.modules.RecoveryWatchdog
 import io.github.fate_grand_automata.scripts.modules.ScreenshotDrops
 import io.github.fate_grand_automata.scripts.modules.Support
 import io.github.fate_grand_automata.scripts.modules.Withdraw
@@ -56,7 +58,8 @@ class AutoBattle @Inject constructor(
     private val connectionRetry: ConnectionRetry,
     private val refill: Refill,
     private val matTracker: MaterialsTracker,
-    private val ceDropsTracker: CEDropsTracker
+    private val ceDropsTracker: CEDropsTracker,
+    private val recovery: RecoveryWatchdog
 ) : EntryPoint(exitManager), IFgoAutomataApi by api {
     sealed class ExitReason(val cause: Exception? = null) {
         data object Abort : ExitReason()
@@ -76,6 +79,7 @@ class AutoBattle @Inject constructor(
         data object Paused : ExitReason()
         data object StopAfterThisRun : ExitReason()
         data object OutOfCommandSpells: ExitReason()
+        class RecoveryExhausted(val detail: String) : ExitReason()
     }
 
     internal class BattleExitException(val reason: ExitReason) : Exception(reason.cause)
@@ -176,48 +180,76 @@ class AutoBattle @Inject constructor(
     private fun loop(): Nothing {
         // a map of validators and associated actions
         // if the validator function evaluates to true, the associated action function is called
-        val screens: Map<() -> Boolean, () -> Unit> = mapOf(
-            { connectionRetry.needsToRetry() } to { connectionRetry.retry() },
-            { battle.isIdle() } to {
+        val screens: List<Triple<String, () -> Boolean, () -> Unit>> = listOf(
+            Triple("connection-retry", { connectionRetry.needsToRetry() }, {
+                val decision = recovery.request("connection-retry", recoveryContext("network"))
+                if (decision.level == RecoveryWatchdog.Level.Stop) recoveryExhausted(decision)
+                connectionRetry.retry()
+            }),
+            Triple("battle", { battle.isIdle() }, {
                 storySkipPossible = false
                 isInBattle = true
                 battle.performBattle()
-            },
-            { isInMenu() } to { menu() },
-            { isStartingNp() } to { skipNp() },
-            { isInBondScreen() } to { handleBondScreen() },
-            { isInResult() } to { result() },
-            { isInDropsScreen() } to { dropScreen() },
-            { isInQuestRewardScreen() } to { questReward() },
-            { isInSupport() } to { support() },
-            { isRepeatScreen() } to { repeatQuest() },
-            { isInOrdealCallOutOfPodsScreen() } to { ordealCallOutOfPods() },
-            { isInInterludeEndScreen() } to { locations.interludeCloseClick.click() },
-            { withdraw.needsToWithdraw() } to { withdraw.withdraw() },
-            { needsToStorySkip() } to { skipStory() },
-            { isFriendRequestScreen() } to { skipFriendRequestScreen() },
-            { isBond10CEReward() } to { bond10CEReward() },
-            { isCeRewardDetails() } to { ceRewardDetails() },
-            { isDeathAnimation() } to { locations.battle.battleSafeMiddleOfScreenClick.click() },
-            { isRankUp() } to { locations.middleOfScreenClick.click() },
-            { isBetweenWaves() } to { locations.battle.battleSafeMiddleOfScreenClick.click() },
+            }),
+            Triple("menu", { isInMenu() }, { menu() }),
+            Triple("np-animation", { isStartingNp() }, { skipNp() }),
+            Triple("bond", { isInBondScreen() }, { handleBondScreen() }),
+            Triple("result", { isInResult() }, { result() }),
+            Triple("drops", { isInDropsScreen() }, { dropScreen() }),
+            Triple("quest-reward", { isInQuestRewardScreen() }, { questReward() }),
+            Triple("support", { isInSupport() }, { support() }),
+            Triple("repeat", { isRepeatScreen() }, { repeatQuest() }),
+            Triple("ordeal-pods", { isInOrdealCallOutOfPodsScreen() }, { ordealCallOutOfPods() }),
+            Triple("interlude-end", { isInInterludeEndScreen() }, { locations.interludeCloseClick.click() }),
+            Triple("withdraw", { withdraw.needsToWithdraw() }, { withdraw.withdraw() }),
+            Triple("story", { needsToStorySkip() }, { skipStory() }),
+            Triple("friend-request", { isFriendRequestScreen() }, { skipFriendRequestScreen() }),
+            Triple("bond-ce", { isBond10CEReward() }, { bond10CEReward() }),
+            Triple("ce-details", { isCeRewardDetails() }, { ceRewardDetails() }),
+            Triple("death-animation", { isDeathAnimation() }, { locations.battle.battleSafeMiddleOfScreenClick.click() }),
+            Triple("rank-up", { isRankUp() }, { locations.middleOfScreenClick.click() }),
+            Triple("between-waves", { isBetweenWaves() }, { locations.battle.battleSafeMiddleOfScreenClick.click() }),
         )
 
         // Loop through SCREENS until a Validator returns true
         while (true) {
-            val actor = useSameSnapIn {
+            val matched = useSameSnapIn {
                 screens
                     .asSequence()
-                    .filter { (validator, _) -> validator() }
-                    .map { (_, actor) -> actor }
+                    .filter { (_, validator, _) -> validator() }
                     .firstOrNull()
             }
-
-            actor?.invoke()
+            val decision = recovery.observe(matched?.first, recoveryContext(matched?.first ?: "unknown"))
+            decision?.let {
+                messages.log(
+                    ScriptLog.Recovery(
+                        area = it.reason,
+                        attempt = it.attempt,
+                        succeeded = false,
+                        level = it.level.name,
+                        remainingBudget = it.remainingBudget
+                    )
+                )
+            }
+            if (decision?.level == RecoveryWatchdog.Level.Stop) recoveryExhausted(decision)
+            matched?.third?.invoke()
 
             0.5.seconds.wait()
         }
     }
+
+    private fun recoveryContext(action: String) = RecoveryWatchdog.Context(
+        wave = state.stage,
+        turn = state.turn,
+        action = action
+    )
+
+    private fun recoveryExhausted(recovery: RecoveryWatchdog.Recovery): Nothing =
+        throw BattleExitException(
+            ExitReason.RecoveryExhausted(
+                "${recovery.reason}; attempt=${recovery.attempt}; level=${recovery.level}"
+            )
+        )
 
     /**
      *  Checks if in menu.png is on the screen, indicating that a quest can be chosen.

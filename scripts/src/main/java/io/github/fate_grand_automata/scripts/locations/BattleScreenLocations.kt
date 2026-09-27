@@ -83,6 +83,12 @@ class BattleScreenLocations @Inject constructor(
             )
         }
 
+    /** NP percentage text below the active servant portrait. Script coordinates are 1440p. */
+    fun npValueRegion(slot: FieldSlot): Region {
+        val skill2 = locate(slot.skill2())
+        return Region(skill2.x + 160, 1240, 300, 110)
+    }
+
     val attackClick =
         (if (isWide)
             Location(-460, -230)
@@ -92,11 +98,14 @@ class BattleScreenLocations @Inject constructor(
 
     val skillOkClick = Location(400, 850).xFromCenter()
     val orderChangeOkClick = Location(0, 1260).xFromCenter()
-    val extraInfoWindowCloseClick = Location(-300, 940).xFromRight()
-    val skillUseRegion = Region(-210, 320, 420, 85).xFromCenter()
 
-    fun servantOpenDetailsClick(slot: FieldSlot) =
-        Location(locate(slot.skill2()).x, 810)
+    val extraInfoWindowCloseClick = Location(-300, 940).xFromRight()
+    val extraInfoWindowCloseRegion = Region(-430, 810, 260, 260).xFromRight()
+
+    val npWarningCloseClick = Location(-300, 540).xFromRight()
+    val npWarningCloseRegion = Region(-430, 410, 260, 260).xFromRight()
+
+    val skillUseRegion = Region(-210, 320, 420, 85).xFromCenter()
 
     fun servantChangeCheckRegion(slot: FieldSlot) =
         slot.skill2().let {
@@ -114,10 +123,6 @@ class BattleScreenLocations @Inject constructor(
 
     fun imageRegion(skill: Skill.Servant) =
         Region(22, 28, 30, 30) + locate(skill)
-
-    val servantDetailsInfoClick = Location(-660, 110).xFromCenter()
-    
-    val servantDetailsFaceCardRegion = Region(-685, 410, 110, 60).xFromCenter()
 
     val battleSafeMiddleOfScreenClick = Location(0, 550).xFromCenter()
 }

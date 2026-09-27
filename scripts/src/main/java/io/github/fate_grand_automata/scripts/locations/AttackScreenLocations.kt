@@ -53,8 +53,32 @@ class AttackScreenLocations @Inject constructor(
         CommandCard.Face.E -> 880
     }.let { x -> Region(x - 100, 700, 500, 400) + faceCardDeltaY }.xFromCenter()
 
+    /**
+     * Central artwork patch used to identify cards belonging to the same servant without opening
+     * the servant status/details dialog. The surrounding search region is intentionally larger
+     * so small animation/layout shifts do not break the comparison.
+     */
+    fun servantIdentitySeedRegion(card: CommandCard.Face) =
+        servantMatchRegion(card).let { region ->
+            Region(region.x + 140, region.y + 70, 220, 180)
+        }
+
+    fun servantIdentitySearchRegion(card: CommandCard.Face) =
+        servantMatchRegion(card)
+
     fun supportCheckRegion(card: CommandCard.Face) =
         affinityRegion(card) + Location(-50, 100)
+
+    /**
+     * Visual probe for confirming that a command-card tap changed the Attack screen.
+     * Face cards use the card-type strip; NP cards use a compact region around the NP button.
+     */
+    fun selectionProbeRegion(card: CommandCard): Region = when (card) {
+        is CommandCard.Face -> typeRegion(card)
+        is CommandCard.NP -> clickLocation(card).let { point ->
+            Region(point.x - 180, point.y - 140, 360, 280)
+        }
+    }
 
     val backClick =
         (if (isWide)

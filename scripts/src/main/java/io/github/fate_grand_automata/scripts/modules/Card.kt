@@ -88,7 +88,17 @@ class Card @Inject constructor(
      * transaction accepts it only when the game visually confirms the NP selection.
      */
     fun prepareNpUsage(requested: NPUsage): NPUsage {
-        val candidates = (requested.nps + spamNps)
+        val requestedCandidates = buildSet {
+            addAll(requested.nps)
+            addAll(spamNps)
+
+            // Fixed frontline: A/slot 1 is Larva/Tiamat. On the second turn in a wave, always
+            // probe her NP even when the static AutoSkill command did not explicitly request "4".
+            // The Attack-page confirmation below decides whether it is actually usable.
+            if (state.turn == 1) add(CommandCard.NP.A)
+        }
+
+        val candidates = requestedCandidates
             .sortedBy { CommandCard.NP.list.indexOf(it) }
             .filter { np ->
                 // Turn 2 / slot A is Larva/Tiamat in the user's fixed frontline. Always let the

@@ -162,6 +162,10 @@ class Card @Inject constructor(
 
     private fun tapAndConfirm(command: CommandCard): TapResult {
         repeat(SELECTION_CLICK_ATTEMPTS) { attempt ->
+            // A previous confirmed input may already have completed the 3-card chain. Never issue
+            // another coordinate tap once the Attack page has disappeared.
+            if (!isAttackSelectionScreenVisible()) return TapResult.Failed
+
             val probe = locations.attack.selectionProbeRegion(command)
             val before = probe.getPattern(
                 "CommandSelection:${state.stage}:${state.turn}:$command:$attempt"

@@ -89,9 +89,15 @@ class Card @Inject constructor(
         val candidates = (requested.nps + spamNps)
             .sortedBy { CommandCard.NP.list.indexOf(it) }
             .filter { np ->
-                when (val gauge = npGaugeReader.read(np.toFieldSlot())) {
-                    is NpGaugeReader.Result.Known -> gauge.percent >= 100
-                    NpGaugeReader.Result.Unknown -> true
+                // Turn 2 / slot A is Larva/Tiamat in the user's fixed frontline. Always let the
+                // Attack-page confirmation decide this NP, even if OCR briefly under-reads 100%.
+                if (state.turn == 1 && np == CommandCard.NP.A) {
+                    true
+                } else {
+                    when (val gauge = npGaugeReader.read(np.toFieldSlot())) {
+                        is NpGaugeReader.Result.Known -> gauge.percent >= 100
+                        NpGaugeReader.Result.Unknown -> true
+                    }
                 }
             }
             .toCollection(linkedSetOf())

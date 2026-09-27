@@ -29,10 +29,21 @@ class NpGaugeReader @Inject constructor(
         const val MAX_READS = 3
         val RETRY_DELAY = 200.milliseconds
 
-        fun parse(text: String): Int? = Regex("""\d{1,3}""")
-            .find(text.replace('O', '0').replace('o', '0'))
-            ?.value
-            ?.toIntOrNull()
-            ?.takeIf { it in 0..300 }
+        fun parse(text: String): Int? {
+            val normalized = text.replace('O', '0').replace('o', '0')
+
+            val value = Regex("""(\d{1,3})\s*%""")
+                .find(normalized)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?: Regex("""(?<![A-Za-z])(\d{1,3})(?![A-Za-z])""")
+                    .find(normalized)
+                    ?.groupValues
+                    ?.getOrNull(1)
+
+            return value
+                ?.toIntOrNull()
+                ?.takeIf { it in 0..300 }
+        }
     }
 }

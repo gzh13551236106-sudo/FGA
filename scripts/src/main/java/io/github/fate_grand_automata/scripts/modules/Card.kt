@@ -63,6 +63,8 @@ class Card @Inject constructor(
         val SELECTION_SETTLE_DELAY = 250.milliseconds
         val SELECTION_EXTRA_SETTLE_DELAY = 350.milliseconds
         val SELECTION_RETRY_DELAY = 180.milliseconds
+        val SELECTION_SUBMIT_POLL_DELAY = 250.milliseconds
+        const val SELECTION_SUBMIT_POLLS = 8
     }
 
     private val spamNps: Set<CommandCard.NP>
@@ -289,8 +291,22 @@ class Card @Inject constructor(
             )
         }
 
-        selectedNps.forEach { caster.confirmUse(it) }
-        return SelectionResult.Submitted
+        // Three local visual changes are not enough by themselves: a late warning/dialog can also
+        // alter a probe. The transaction is committed only after the Attack card page actually
+        // disappears. NP animation time is not part of this check; we stop polling as soon as the
+        // command-card UI is gone.
+        repeat(SELECTION_SUBMIT_POLLS) {
+            if (!isAttackSelectionScreenVisible()) {
+                selectedNps.forEach { caster.confirmUse(it) }
+                return SelectionResult.Submitted
+            }
+            SELECTION_SUBMIT_POLL_DELAY.wait()
+        }
+
+        return finishSelectionFailure(
+            "three-confirmed-but-attack-still-visible",
+            selectedNps
+        )
     }
 
 }

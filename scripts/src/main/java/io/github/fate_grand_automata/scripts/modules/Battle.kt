@@ -96,16 +96,64 @@ class Battle @Inject constructor(
         servantTracker.beginTurn()
         ensureBattlePage("servant-scan-left-battle-page")
 
-        val npUsage = autoSkill.execute(state.stage, state.turn)
+        val requestedNpUsage = autoSkill.execute(state.stage, state.turn)
         skillSpam.spamSkills()
+
+        // Resolve NP readiness while the battle HUD is still visible. OCR Unknown is handled
+        // safely by the Attack-page transaction instead of being blindly accepted or discarded.
+        val npUsage = card.prepareNpUsage(requestedNpUsage)
 
         val cards = readCardsWithRecovery()
             .takeUnless { shouldShuffle(it, npUsage) }
             ?: shuffleCards()
 
-        card.clickCommandCards(cards, npUsage)
+        selectCardsWithRecovery(cards, npUsage)
 
         0.5.seconds.wait()
+    }
+
+    private fun selectCardsWithRecovery(
+        initialCards: List<ParsedCard>,
+        npUsage: NPUsage
+    ) {
+        var cards = initialCards
+
+        repeat(2) { attempt ->
+            when (val result = card.clickCommandCards(cards, npUsage)) {
+                Card.SelectionResult.Submitted -> return
+
+                is Card.SelectionResult.NeedsRestart -> {
+                    // Only one full Attack-page restart is allowed. Local per-card retry already
+                    // happened inside Card; a second failed transaction stops safely.
+                    val decision = recovery.request(
+                        "command-selection:${result.reason}",
+                        RecoveryWatchdog.Context(state.stage, state.turn, "select-cards")
+                    )
+                    if (decision.level == RecoveryWatchdog.Level.Stop || attempt == 1) {
+                        recoveryStop("command-selection:${result.reason}")
+                    }
+
+                    // Defensive guard: if command cards already vanished, the turn was submitted
+                    // despite an ambiguous visual probe. Never tap Back on live combat.
+                    if (!card.isAttackSelectionScreenVisible()) return
+
+                    locations.attack.backClick.click()
+                    if (!locations.battle.screenCheckRegion.exists(
+                            images[Images.BattleScreen],
+                            2.seconds
+                        )
+                    ) {
+                        recoveryStop("command-selection-back")
+                    }
+
+                    cards = when (val recovered = clickAttack()) {
+                        is CardParser.Result.Normal, is CardParser.Result.Degraded -> recovered.cards
+                        is CardParser.Result.NeedsRecovery, is CardParser.Result.Unsafe ->
+                            recoveryStop("command-selection-reentry")
+                    }
+                }
+            }
+        }
     }
 
     private fun readCardsWithRecovery(): List<ParsedCard> {

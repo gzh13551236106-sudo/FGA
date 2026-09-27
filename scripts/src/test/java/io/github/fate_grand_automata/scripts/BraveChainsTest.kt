@@ -166,7 +166,7 @@ class BraveChainsTest {
     @Test
     fun sameServantModeDegradesForOneTurnWithoutChangingLaterStrategy() {
         val selector = ApplyBraveChains()
-        val degraded = lineup1.map { it.copy(servant = TeamSlot.Unknown, fieldSlot = null) }
+        val degraded = FaceCardPriorityTest.lineup1.map { it.copy(servant = TeamSlot.Unknown, fieldSlot = null) }
 
         val degradedPick = selector.pick(
             degraded,
@@ -181,7 +181,7 @@ class BraveChainsTest {
         )
 
         val normalPick = selector.pick(
-            lineup1,
+            FaceCardPriorityTest.lineup1,
             BraveChainEnum.SameServantBusterQuickArts
         ).map { it.card }
         assertThat(normalPick).containsExactly(

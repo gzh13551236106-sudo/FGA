@@ -96,9 +96,19 @@ class Card @Inject constructor(
             }
             .toCollection(linkedSetOf())
 
+        val cardsBeforeNp = when {
+            candidates.isEmpty() -> 0
+
+            // User's fixed frontline has Larva/Tiamat in A/slot 1. On turn 2, when her NP is a
+            // candidate, it must occupy the first command position before any face card.
+            state.turn == 1 && CommandCard.NP.A in candidates -> 0
+
+            else -> requested.cardsBeforeNP
+        }
+
         return NPUsage(
             nps = candidates,
-            cardsBeforeNP = if (candidates.isEmpty()) 0 else requested.cardsBeforeNP
+            cardsBeforeNP = cardsBeforeNp
         )
     }
 

@@ -14,7 +14,9 @@ class NpGaugeReaderTest {
         assertThat(NpGaugeReader.parse("NP 99% ")).isEqualTo(99)
         assertThat(NpGaugeReader.parse("100% ")).isEqualTo(100)
         assertThat(NpGaugeReader.parse(" 120 %")).isEqualTo(120)
+        assertThat(NpGaugeReader.parse("1OO%")).isEqualTo(100)
         assertThat(NpGaugeReader.parse("unknown")).isNull()
+        assertThat(NpGaugeReader.parse("unknOwn")).isNull()
     }
 
     @Test fun uOlgaThresholdIsConservative() {
